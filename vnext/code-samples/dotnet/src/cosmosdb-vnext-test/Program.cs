@@ -1,6 +1,7 @@
-﻿﻿// Program.cs
+﻿// Program.cs
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Threading.Tasks;
 using Microsoft.Azure.Cosmos;
@@ -9,16 +10,16 @@ using Newtonsoft.Json;
 public class TestDocument
 {
     [JsonProperty("id")]
-    public string Id { get; set; }
+    public string Id { get; set; } = string.Empty;
 
     [JsonProperty("queryfield")]
-    public string Queryfield { get; set; }
+    public string? Queryfield { get; set; }
 
     [JsonProperty("pk")]
-    public string PartitionKey { get; set; }  // This property must match the partition key path without leading slash
+    public string PartitionKey { get; set; } = string.Empty;  // This property must match the partition key path without leading slash
 
     [JsonProperty("city")]
-    public string City { get; set; }
+    public string? City { get; set; }
 }
 
 public class CosmosDbDemo
@@ -67,6 +68,15 @@ public class CosmosDbDemo
 
     private async Task RunDemoAsync()
     {
+        var iterator = cosmosClient.GetDatabaseQueryIterator<DatabaseProperties>();
+        while (iterator.HasMoreResults)
+        {
+            await iterator.ReadNextAsync();
+        }
+
+        // If we reach here without exception, the database is ready and accessible
+        Debug.Assert(true, "Database properties read successfully at startup");
+
         // Create a unique database name and container name
         string databaseName = $"db-{Guid.NewGuid():N}";
         string containerName = $"container-{Guid.NewGuid():N}";
@@ -159,9 +169,9 @@ public class CosmosDbDemo
         return document;
     }
 
-    private async Task UpdateDocumentAndVerifyAsync(Container container, string id, string partitionKey, string newCity)
+    private async Task UpdateDocumentAndVerifyAsync(Container container, string id, string partitionKey, string? newCity)
     {
-        Console.WriteLine($"Updating document {id} with new city: {newCity}");
+        Console.WriteLine($"Updating document {id} with new city: {newCity ?? "null"}");
         
         try
         {
@@ -172,7 +182,7 @@ public class CosmosDbDemo
                 .WithParameter("@id", id)
                 .WithParameter("@pk", partitionKey);
             
-            TestDocument existingDocument = null;
+            TestDocument? existingDocument = null;
             using (var iterator = container.GetItemQueryIterator<TestDocument>(queryDefinition))
             {
                 var response = await iterator.ReadNextAsync();
@@ -287,7 +297,7 @@ public class CosmosDbDemo
                 .WithParameter("@id", id)
                 .WithParameter("@pk", partitionKey);
             
-            TestDocument documentToDelete = null;
+            TestDocument? documentToDelete = null;
             using (var iterator = container.GetItemQueryIterator<TestDocument>(queryDefinition))
             {
                 var response = await iterator.ReadNextAsync();
@@ -480,8 +490,8 @@ public class CosmosDbDemo
     {
         Console.WriteLine("Testing Change Feed Latest Versions Mode from Beginning...");
         
-        string continuationToken = null;
-        int pageHintSize = 2;
+        string? continuationToken = null;
+        int pageHintSize = 100;
         
         using FeedIterator<TestDocument> feedIterator = container.GetChangeFeedIterator<TestDocument>(
             ChangeFeedStartFrom.Beginning(),
@@ -494,7 +504,7 @@ public class CosmosDbDemo
         
         while (feedIterator.HasMoreResults)
         {
-            FeedResponse<TestDocument> response = await feedIterator.ReadNextAsync();
+            FeedResponse<TestDocument> response = await feedIterator.ReadNextAsync(cancellationToken: default);
             pageCount++;
             
             Console.WriteLine($"Page {pageCount}: Status Code = {response.StatusCode}");
