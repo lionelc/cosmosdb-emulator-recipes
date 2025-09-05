@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 
+
 public class TestDocument
 {
     [JsonProperty("id")]
@@ -20,6 +21,16 @@ public class TestDocument
 
     [JsonProperty("city")]
     public string? City { get; set; }
+
+    // System properties that Cosmos DB manages
+    [JsonProperty("_rid")]
+    public string? ResourceId { get; set; }
+
+    [JsonProperty("_ts")]
+    public long? Timestamp { get; set; }
+
+    [JsonProperty("_etag")]
+    public string? ETag { get; set; }
 }
 
 public class CosmosDbDemo
@@ -121,6 +132,9 @@ public class CosmosDbDemo
 
         Console.WriteLine("\nRunning Change Feed Demo...");
         await RunChangeFeedDemoAsync(container);
+
+        Console.WriteLine("\nTesting ReplaceItemAsync _rid issue...");
+        await TestReplaceItemAsyncRidIssueAsync(container);
 
         Console.WriteLine("Cleaning up...");
         await database.DeleteAsync();
@@ -454,6 +468,95 @@ public class CosmosDbDemo
         Console.WriteLine($"Found {count} document(s) in total");
     }
 
+    private async Task TestReplaceItemAsyncRidIssueAsync(Container container)
+    {
+        Console.WriteLine("=== Testing ReplaceItemAsync _rid Issue for vnext-issue 223 ===");
+
+        try
+        {
+            // Create a test document
+            var testDoc = new TestDocument
+            {
+                Id = Guid.NewGuid().ToString(),
+                City = "TestCity",
+                PartitionKey = "test-pk",
+                Queryfield = "simple"
+            };
+
+            // Create hierarchical partition key
+            PartitionKey hierarchicalPK = new PartitionKeyBuilder()
+                .Add(testDoc.PartitionKey)
+                .Add(testDoc.Queryfield)
+                .Build();
+
+            Console.WriteLine("Creating initial document...");
+            ItemResponse<TestDocument> createResponse = await container.CreateItemAsync(testDoc, hierarchicalPK);
+            
+            var createdItem = createResponse.Resource;
+            Console.WriteLine("\nItem created:");
+            Console.WriteLine(JsonConvert.SerializeObject(createdItem, Formatting.Indented));
+            
+            // Verify _rid is present after creation
+            if (string.IsNullOrEmpty(createdItem.ResourceId))
+            {
+                Console.WriteLine("WARNING: _rid is missing after creation!");
+            }
+            else
+            {
+                Console.WriteLine($"_rid present after creation: {createdItem.ResourceId}");
+            }
+
+            // Now update the document using ReplaceItemAsync
+            Console.WriteLine("\nUpdating document using ReplaceItemAsync...");
+            createdItem.City = "UpdatedCity";  // Change the value
+
+            ItemResponse<TestDocument> updateResponse = await container.ReplaceItemAsync(
+                item: createdItem,
+                id: createdItem.Id,
+                partitionKey: hierarchicalPK
+            );
+
+            var updatedItem = updateResponse.Resource;
+            Console.WriteLine("\nItem updated:");
+            Console.WriteLine(JsonConvert.SerializeObject(updatedItem, Formatting.Indented));
+
+            // Check if _rid is still present after update
+            if (string.IsNullOrEmpty(updatedItem.ResourceId))
+            {
+                Console.WriteLine("❌ BUG REPRODUCED: _rid is missing after ReplaceItemAsync!");
+                Console.WriteLine("Expected: _rid should be preserved after update");
+                Console.WriteLine("Actual: _rid is null or empty");
+            }
+            else
+            {
+                Console.WriteLine($"✅ _rid preserved after update: {updatedItem.ResourceId}");
+            }
+
+            // Also compare other system properties
+            Console.WriteLine("\nSystem Properties Comparison:");
+            Console.WriteLine($"Created _rid: {createdItem.ResourceId ?? "null"}");
+            Console.WriteLine($"Updated _rid: {updatedItem.ResourceId ?? "null"}");
+            Console.WriteLine($"Created _etag: {createdItem.ETag ?? "null"}");
+            Console.WriteLine($"Updated _etag: {updatedItem.ETag ?? "null"}");
+            Console.WriteLine($"Created _ts: {createdItem.Timestamp?.ToString() ?? "null"}");
+            Console.WriteLine($"Updated _ts (_ts update only happens on server side): {updatedItem.Timestamp?.ToString() ?? "null"}");
+
+            Console.WriteLine("\nReplaceItemAsync _rid test completed.");
+        }
+        catch (CosmosException ex)
+        {
+            Console.WriteLine($"Cosmos DB Error during ReplaceItemAsync test: {ex.StatusCode} - {ex.Message}");
+            Console.WriteLine($"Details: {ex}");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"General error during ReplaceItemAsync test: {ex.Message}");
+            Console.WriteLine($"Details: {ex}");
+            throw;
+        }
+    }
+
     private async Task RunChangeFeedDemoAsync(Container container)
     {
         Console.WriteLine("=== Change Feed Demo ===");
@@ -469,8 +572,7 @@ public class CosmosDbDemo
         await ModifyDocumentsAndTestIncrementalChangeFeedAsync(container);
     }
 
-    private async Task CreateMultipleTestDocumentsAsync(Container container, int documentCount)
-    {
+    private async Task CreateMultipleTestDocumentsAsync(Container container, int documentCount)    {
         Console.WriteLine($"Creating {documentCount} test documents...");
         
         for (int i = 0; i < documentCount; i++)
