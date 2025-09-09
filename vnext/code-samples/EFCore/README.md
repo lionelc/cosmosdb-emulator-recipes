@@ -38,7 +38,7 @@ This test suite mirrors the functionality of the direct CosmosDB SDK test (`vnex
 
 ### Prerequisites
 - .NET 9.0 SDK
-- CosmosDB Emulator running locally on `http://localhost:8081` (when it's https, need to change the endpoint setting correspondingly)
+- CosmosDB Emulator running locally on `http://localhost:8081` (when it's https, need to change the endpoint setting correspondingly): see the [guide](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator-linux)
 
 ### Running the Tests
 
